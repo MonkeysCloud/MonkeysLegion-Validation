@@ -1,0 +1,29 @@
+{
+  "name": "monkeyscloud/monkeyslegion-validation",
+  "description": "Attribute-driven DTO binding and validation layer for the MonkeysLegion framework.",
+  "type": "library",
+  "license": "MIT",
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "require": {
+    "php": "^8.4",
+    "ext-json": "*",
+    "ext-mbstring": "*",
+    "monkeyscloud/monkeyslegion-core": "^1.0@dev",
+    "monkeyscloud/monkeyslegion-di": "dev-main",
+    "psr/http-message": "^2.0 || ^1.0",
+    "psr/http-server-handler": "^1.0",
+    "psr/http-server-middleware": "^1.0",
+    "laminas/laminas-diactoros": "^3.6"
+  },
+  "autoload": {
+    "psr-4": {
+      "MonkeysLegion\\Validation\\": "src/"
+    }
+  },
+  "extra": {
+    "branch-alias": {
+      "dev-main": "1.0-dev"
+    }
+  }
+}
