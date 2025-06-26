@@ -4,8 +4,8 @@ namespace MonkeysLegion\Validation;
 use Psr\Http\Message\ServerRequestInterface;
 use ReflectionClass;
 use RuntimeException;
-use ValidationError;
-use ValidatorInterface;
+use MonkeysLegion\Validation\ValidatorInterface;
+use MonkeysLegion\Validation\ValidationError;
 
 final class DtoBinder
 {
@@ -17,6 +17,7 @@ final class DtoBinder
      * @template T of object
      * @param class-string<T> $dtoClass
      * @return array{dto:T, errors:ValidationError[]}
+     * @throws \ReflectionException|\JsonException
      */
     public function bind(string $dtoClass, ServerRequestInterface $request): array
     {
