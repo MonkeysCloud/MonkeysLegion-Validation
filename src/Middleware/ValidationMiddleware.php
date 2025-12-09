@@ -1,4 +1,5 @@
 <?php
+
 namespace MonkeysLegion\Validation\Middleware;
 
 use JsonException;
@@ -23,7 +24,7 @@ final class ValidationMiddleware implements MiddlewareInterface
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $routeName = $request->getAttribute('route');  // Adapt if you store route differently
-        $dtoClass  = $this->dtoMap[$routeName] ?? null;
+        $dtoClass  = ($routeName !== null) ? ($this->dtoMap[$routeName] ?? null) : null;
 
         if ($dtoClass) {
             ['dto' => $dto, 'errors' => $errors] = $this->binder->bind($dtoClass, $request);
