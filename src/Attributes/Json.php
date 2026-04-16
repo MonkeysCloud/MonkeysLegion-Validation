@@ -8,16 +8,16 @@ use MonkeysLegion\Validation\Contracts\ConstraintInterface;
 use MonkeysLegion\Validation\ValidationError;
 
 use Attribute;
+use JsonException;
 
 /**
- * Value must be a decimal number with specified scale.
+ * Value must be a valid JSON string.
  */
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
-final readonly class Decimal implements ConstraintInterface
+final readonly class Json implements ConstraintInterface
 {
     public function __construct(
-        public int $scale = 2,
-        public string $message = 'Value must be a valid decimal.',
+        public string $message = 'Value must be valid JSON.',
     ) {}
 
     public function validate(mixed $value, string $field, object $dto): ?ValidationError
@@ -26,9 +26,13 @@ final readonly class Decimal implements ConstraintInterface
             return null;
         }
 
-        $pattern = '/^-?\d+(?:\.\d{0,' . $this->scale . '})?$/';
+        if (!is_string($value)) {
+            return new ValidationError($field, $this->message);
+        }
 
-        if (!preg_match($pattern, (string) $value)) {
+        try {
+            json_decode($value, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
             return new ValidationError($field, $this->message);
         }
 
