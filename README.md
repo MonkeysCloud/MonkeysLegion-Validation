@@ -1,56 +1,50 @@
-# MonkeysLegion Validation
+# MonkeysLegion Validation
 
-Attribute‑driven **DTO binding & validation layer** for the [MonkeysLegion](https://github.com/monkeyscloud) PHP framework.
-
----
-
-## ✨ Features
-
-* **Attribute‑based constraints** – ship with `#[NotBlank]`, `#[Email]`, `#[Length]` (extend in minutes)
-* **Automatic binding** – JSON body *and* query parameters → strongly‑typed DTO
-* **PSR‑15 middleware** – intercepts the request, validates, and returns a *400 JSON* error payload if needed
-* **Fail‑fast & zero‑magic** – no doctrine/metadata proxies, only native PHP reflection
-* **Extensible** – write a new constraint attribute in <10 LOC
-* **Lean footprint** – depends only on PSR interfaces + Laminas Diactoros for JsonResponse
+Attribute‑driven **DTO binding & validation** for the [MonkeysLegion](https://github.com/monkeyscloud) PHP 8.4 framework — self-validating constraints, property hooks, PSR-15 middleware.
 
 ---
 
-## 🛠 Requirements
+## ✨ Features
 
-|               | Minimum                                                                                                  |
-| ------------- | -------------------------------------------------------------------------------------------------------- |
-| PHP           | **8.4**                                                                                                  |
-| Extensions    | `ext-json`, `ext-mbstring`                                                                               |
-| Composer deps | `psr/http-message`, `psr/http-server-handler`, `psr/http-server-middleware`, `laminas/laminas-diactoros` |
-
-> All other MonkeysLegion packages (`core`, `di`, …) are pulled in transitively.
+* **Self-validating constraints** — each `#[Email]`, `#[NotBlank]`, etc. validates itself (no monolithic if/else chain)
+* **PHP 8.4 property hooks** — `$result->isValid`, `$result->errors`, `$result->errorCount`
+* **24 built-in constraints** — strings, numbers, dates, collections, networking, cross-field, and more
+* **Automatic DTO binding** — JSON body + query parameters → strongly‑typed DTO
+* **PSR‑15 middleware** — validates, returns `422 Unprocessable Entity` on failure
+* **ValidationResult** — structured result object with field-level error queries
+* **ValidationException** — throwable with full result for catch-and-inspect
+* **Zero magic** — no doctrine proxies, only native PHP reflection & attributes
+* **Extensible** — implement `ConstraintInterface` in a single class to add constraints
 
 ---
 
-## 🚀 Installation
+## 🛠 Requirements
+
+| | Minimum |
+|---|---|
+| PHP | **8.4** |
+| Extensions | `ext-json`, `ext-mbstring` |
+| PSR | `psr/http-message ^2.0`, `psr/http-server-handler ^1.0`, `psr/http-server-middleware ^1.0` |
+
+---
+
+## 🚀 Installation
 
 ```bash
-composer require monkeyscloud/monkeyslegion-validation:^1.0@dev
-```
-
-Ensure your root *composer.json* allows dev stability while we are pre‑1.0:
-
-```jsonc
-{
-  "minimum-stability": "dev",
-  "prefer-stable": true
-}
+composer require monkeyscloud/monkeyslegion-validation:^2.0
 ```
 
 ---
 
-## ⚡ Quick Start
+## ⚡ Quick Start
 
-### 1. Define a DTO
+### 1. Define a DTO with constraints
 
 ```php
 <?php
-namespace App\Http\Dto;
+declare(strict_types=1);
+
+namespace App\Dto;
 
 use MonkeysLegion\Validation\Attributes as Assert;
 
@@ -64,126 +58,210 @@ final readonly class CreateUserRequest
         #[Assert\NotBlank]
         #[Assert\Length(min: 8, max: 64)]
         public string $password,
-        
-        #[Assert\NotBlank]
-        #[Assert\Pattern('/^[A-Z0-9_-]{3,10}$/')]
-        public string $sku,
 
-        #[Assert\Range(min: 0.01, max: 9999.99)]
-        public float $price,
-
-        #[Assert\Url]
-        public string $productPage,
-
-        #[Assert\UuidV4]
-        public string $categoryId,
+        #[Assert\SameAs(otherField: 'password')]
+        public string $confirmPassword,
     ) {}
 }
 ```
 
-### 2. Register services in your DI container
+### 2. Validate directly
 
 ```php
-$container->register(\MonkeysLegion\Validation\ValidatorInterface::class,
-                     \MonkeysLegion\Validation\AttributeValidator::class);
+use MonkeysLegion\Validation\Validator;
 
-$container->register(\MonkeysLegion\Validation\DtoBinder::class)
-          ->addArgument($container->get(\MonkeysLegion\Validation\ValidatorInterface::class));
+$validator = new Validator();
+$result = $validator->validate($dto);
+
+if (!$result->isValid) {
+    foreach ($result->errors as $error) {
+        echo "{$error->field}: {$error->message}\n";
+    }
+}
+
+// Or throw on failure:
+$result->throwIfInvalid();
 ```
 
-### 3. Add the middleware to your PSR‑15 pipeline
+### 3. Use the helper function
 
 ```php
+$result = validate($dto);
+
+if ($result->hasErrorsFor('email')) {
+    echo $result->firstError('email');
+}
+```
+
+### 4. PSR-15 middleware integration
+
+```php
+use MonkeysLegion\Validation\DtoBinder;
+use MonkeysLegion\Validation\Validator;
 use MonkeysLegion\Validation\Middleware\ValidationMiddleware;
 
-$pipeline->pipe(new ValidationMiddleware(
-    $container->get(\MonkeysLegion\Validation\DtoBinder::class),
-    [
-        // router‑name => DTO class
-        'user_create' => \App\Http\Dto\CreateUserRequest::class,
-    ]
-));
+$middleware = new ValidationMiddleware(
+    binder: new DtoBinder(new Validator()),
+    responseFactory: $responseFactory,   // PSR-17 ResponseFactoryInterface
+    streamFactory: $streamFactory,       // PSR-17 StreamFactoryInterface
+    dtoMap: [
+        'user.create' => \App\Dto\CreateUserRequest::class,
+    ],
+);
 ```
 
-### 4. Use the validated DTO in your handler
+When validation fails the client receives:
+
+```json
+HTTP/1.1 422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "errors": [
+    { "field": "email", "message": "Value must be a valid e-mail." },
+    { "field": "password", "message": "Length constraint violated." }
+  ]
+}
+```
+
+### 5. Handler with validated DTO
 
 ```php
 public function createUser(ServerRequestInterface $request): ResponseInterface
 {
-    /** @var \App\Http\Dto\CreateUserRequest $dto */
+    /** @var CreateUserRequest $dto */
     $dto = $request->getAttribute('dto');
 
     $this->userService->register($dto->email, $dto->password);
 
-    return new JsonResponse(['status' => 'created'], 201);
+    return $this->responseFactory->createResponse(201);
 }
 ```
 
-> When validation fails the client receives:
->
-> ```json
-> HTTP/1.1 400 Bad Request
-> Content-Type: application/json
->
-> {
->   "errors": [
->     { "field": "email", "message": "Value must be a valid e-mail." },
->     { "field": "password", "message": "Length constraint violated." }
->   ]
-> }
-> ```
+---
+
+## 📦 Built-in Constraints
+
+### Strings
+| Attribute | Description |
+|-----------|-------------|
+| `#[NotBlank]` | Value must not be null, empty string, or empty array |
+| `#[Email]` | Valid e-mail address |
+| `#[Length(min, max)]` | String length within bounds (UTF-8) |
+| `#[Pattern(regex)]` | Matches regular expression |
+| `#[Alpha]` | Letters only |
+| `#[Alnum]` | Letters and digits only |
+| `#[Json]` | Valid JSON string |
+
+### Numbers
+| Attribute | Description |
+|-----------|-------------|
+| `#[Numeric]` | Value is numeric (`is_numeric`) |
+| `#[Min(value)]` | Minimum numeric value |
+| `#[Max(value)]` | Maximum numeric value |
+| `#[Range(min, max)]` | Numeric range |
+| `#[Decimal(scale)]` | Decimal with max scale digits |
+
+### Collections
+| Attribute | Description |
+|-----------|-------------|
+| `#[Count(min, max)]` | Array/iterable size within bounds |
+| `#[Choice(choices)]` | Value in allowed list |
+
+### Dates
+| Attribute | Description |
+|-----------|-------------|
+| `#[Date(format)]` | Valid date (default: Y-m-d) |
+| `#[After(otherField)]` | Date after another field |
+| `#[Before(otherField)]` | Date before another field |
+
+### Networking
+| Attribute | Description |
+|-----------|-------------|
+| `#[Url]` | Valid URL |
+| `#[Ip(allowV6)]` | Valid IP address |
+| `#[UuidV4]` | Valid UUID v4 |
+
+### Cross-field & Type
+| Attribute | Description |
+|-----------|-------------|
+| `#[SameAs(otherField)]` | Must match another field |
+| `#[Type(type)]` | PHP type check (string, int, float, bool, array, or class) |
+| `#[Unique]` | Marker for uniqueness (consumer provides checker) |
+| `#[Callback(fn)]` | Custom callable validation |
 
 ---
 
-## 🪄 Adding Custom Constraints
+## 🪄 Creating Custom Constraints
 
-1. **Create an attribute class** implementing `ConstraintInterface` (optional but recommended):
+Implement `ConstraintInterface` — the constraint is the validator:
 
 ```php
-namespace MonkeysLegion\Validation\Attributes;
+<?php
+declare(strict_types=1);
 
-use MonkeysLegion\Validation\ConstraintInterface;
+namespace App\Validation;
 
-#[\Attribute(\Attribute::TARGET_PROPERTY)]
-final class UuidV4 implements ConstraintInterface
+use MonkeysLegion\Validation\Contracts\ConstraintInterface;
+use MonkeysLegion\Validation\ValidationError;
+use Attribute;
+
+#[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
+final readonly class Slug implements ConstraintInterface
 {
     public function __construct(
-        public string $message = 'Value must be a valid UUIDv4.'
+        public string $message = 'Value must be a valid URL slug.',
     ) {}
+
+    public function validate(mixed $value, string $field, object $dto): ?ValidationError
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (!preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/', (string) $value)) {
+            return new ValidationError($field, $this->message);
+        }
+
+        return null;
+    }
 }
 ```
 
-2. **Add a check** inside `AttributeValidator::validate()`:
+Now `#[Slug]` is usable on any DTO property — no registration needed.
 
-```php
-if ($instance instanceof Assert\UuidV4 &&
-    !preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $value)) {
-    $errors[] = new ValidationError($prop->getName(), $instance->message);
-}
+---
+
+## 🧪 Testing
+
+```bash
+composer test
+# or
+vendor/bin/phpunit
 ```
 
-That’s it—`#[UuidV4]` is now usable on any DTO property.
+57 tests, 71 assertions covering all 24 constraints.
 
 ---
 
-## 🗺 Roadmap
+## 🗺 Roadmap
 
-* 🌐 Localisable validation messages
-* 🔌 Symfony Validation bridge
-* 📚 Constraint composition (`#[Assert\All(new Assert\Email())]`‑style)
-* 🧰 CLI generator for DTO & constraint scaffolding
+* 🌐 I18n-aware validation messages via `monkeyslegion-i18n`
+* 📚 Constraint composition (`#[Each(new Email())]` style)
+* 🔄 Async validation for remote checks (uniqueness, etc.)
+* 🧰 CLI generator for DTO scaffolding
 
 ---
 
-## 🙌 Contributing
+## 🙌 Contributing
 
 1. Fork & create a feature branch.
-2. Follow PSR‑12 coding standards.
+2. Follow [MonkeysLegion v2 code standards](https://github.com/MonkeysCloud/MonkeysLegion/blob/main/monkeyslegion_v2_code_standards.md).
 3. Add unit tests (`vendor/bin/phpunit`).
 4. Open a PR.
 
 ---
 
-## 📄 License
+## 📄 License
 
-Released under the MIT License © 2025 MonkeysCloud.
+Released under the MIT License © 2026 MonkeysCloud.
