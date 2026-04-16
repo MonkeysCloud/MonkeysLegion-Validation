@@ -8,24 +8,55 @@ use MonkeysLegion\Validation\Contracts\ConstraintInterface;
 use MonkeysLegion\Validation\ValidationError;
 
 use Attribute;
+use Closure;
 
 /**
- * Marker: value must be unique (consumer provides checker callback).
+ * Value must be unique — resolved via a registered checker callable.
  *
- * This attribute flags a field as requiring uniqueness.
- * A checker callable must be provided which returns true if the value exists.
+ * The checker receives the value and must return true if a duplicate exists.
+ * If no checker is set, the constraint is a no-op marker.
+ *
+ * Usage with checker:
+ * ```php
+ * $unique = new Unique();
+ * $unique->setChecker(fn(mixed $v) => $userRepo->existsByEmail($v));
+ * ```
  */
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
-final readonly class Unique implements ConstraintInterface
+final class Unique implements ConstraintInterface
 {
+    /** @var (Closure(mixed): bool)|null */
+    private ?Closure $checker = null;
+
     public function __construct(
-        public string $message = 'Value must be unique.',
+        public readonly string $message = 'Value must be unique.',
     ) {}
+
+    /**
+     * Register a callable that returns true when a duplicate exists.
+     *
+     * @param callable(mixed): bool $checker
+     */
+    public function setChecker(callable $checker): void
+    {
+        $this->checker = $checker(...);
+    }
 
     public function validate(mixed $value, string $field, object $dto): ?ValidationError
     {
-        // Uniqueness requires external state (DB) — this is a marker-only
-        // constraint. The Validator resolves uniqueness via registered checkers.
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        // No checker registered — skip (marker-only mode)
+        if ($this->checker === null) {
+            return null;
+        }
+
+        if (($this->checker)($value)) {
+            return new ValidationError($field, $this->message);
+        }
+
         return null;
     }
 }

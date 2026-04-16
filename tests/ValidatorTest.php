@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MonkeysLegion\Validation\Tests;
 
 use MonkeysLegion\Validation\Attributes as Assert;
-use MonkeysLegion\Validation\ValidationResult;
 use MonkeysLegion\Validation\Validator;
 
 use PHPUnit\Framework\TestCase;
@@ -409,7 +408,7 @@ final class ValidatorTest extends TestCase
 
     // ── After / Before ───────────────────────────────────────────
 
-    public function test_after_fails(): void
+    public function test_after_passes_when_date_is_later(): void
     {
         $dto = new class ('2024-01-01', '2024-06-01') {
             public function __construct(

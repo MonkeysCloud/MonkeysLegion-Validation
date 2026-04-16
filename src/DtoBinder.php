@@ -100,6 +100,7 @@ final class DtoBinder
         }
 
         $args = [];
+        $missing = [];
 
         foreach ($ctor->getParameters() as $param) {
             $name = $param->getName();
@@ -108,9 +109,17 @@ final class DtoBinder
                 $args[] = $data[$name];
             } elseif ($param->isDefaultValueAvailable()) {
                 $args[] = $param->getDefaultValue();
-            } else {
+            } elseif ($param->allowsNull()) {
                 $args[] = null;
+            } else {
+                $missing[] = $name;
             }
+        }
+
+        if ($missing !== []) {
+            throw new RuntimeException(
+                "{$dtoClass} is missing required fields: " . implode(', ', $missing),
+            );
         }
 
         /** @var T */

@@ -23,6 +23,10 @@ final readonly class SameAs implements ConstraintInterface
 
     public function validate(mixed $value, string $field, object $dto): ?ValidationError
     {
+        if (!property_exists($dto, $this->otherField)) {
+            return new ValidationError($field, "Referenced field '{$this->otherField}' does not exist.");
+        }
+
         $ref = new ReflectionProperty($dto, $this->otherField);
         $other = $ref->getValue($dto);
 

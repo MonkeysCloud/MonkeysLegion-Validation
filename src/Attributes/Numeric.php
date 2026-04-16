@@ -10,7 +10,7 @@ use MonkeysLegion\Validation\ValidationError;
 use Attribute;
 
 /**
- * Value must be numeric (digits only).
+ * Value must be numeric (integers, floats, and numeric strings).
  */
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
 final readonly class Numeric implements ConstraintInterface

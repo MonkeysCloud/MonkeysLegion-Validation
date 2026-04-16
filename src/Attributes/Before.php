@@ -28,6 +28,10 @@ final readonly class Before implements ConstraintInterface
             return null;
         }
 
+        if (!property_exists($dto, $this->otherField)) {
+            return new ValidationError($field, "Referenced field '{$this->otherField}' does not exist.");
+        }
+
         $ref = new ReflectionProperty($dto, $this->otherField);
         $other = $ref->getValue($dto);
 
@@ -35,8 +39,12 @@ final readonly class Before implements ConstraintInterface
             return null;
         }
 
-        $current = new DateTimeImmutable((string) $value);
-        $compare = new DateTimeImmutable((string) $other);
+        try {
+            $current = new DateTimeImmutable((string) $value);
+            $compare = new DateTimeImmutable((string) $other);
+        } catch (\Exception) {
+            return new ValidationError($field, 'Value is not a valid date.');
+        }
 
         if ($current >= $compare) {
             $msg = str_replace(':other', $this->otherField, $this->message);
