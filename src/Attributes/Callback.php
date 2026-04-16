@@ -8,27 +8,32 @@ use MonkeysLegion\Validation\Contracts\ConstraintInterface;
 use MonkeysLegion\Validation\ValidationError;
 
 use Attribute;
+use Closure;
 
 /**
- * Value must be a decimal number with specified scale.
+ * Custom validation via callable.
+ *
+ * The callback receives the value and must return true if valid.
  */
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
-final readonly class Decimal implements ConstraintInterface
+final class Callback implements ConstraintInterface
 {
+    /** @var Closure(mixed): bool */
+    private Closure $callback;
+
+    /**
+     * @param callable(mixed): bool $callback
+     */
     public function __construct(
-        public int $scale = 2,
-        public string $message = 'Value must be a valid decimal.',
-    ) {}
+        callable $callback,
+        public readonly string $message = 'Callback validation failed.',
+    ) {
+        $this->callback = $callback(...);
+    }
 
     public function validate(mixed $value, string $field, object $dto): ?ValidationError
     {
-        if ($value === null || $value === '') {
-            return null;
-        }
-
-        $pattern = '/^-?\d+(?:\.\d{0,' . $this->scale . '})?$/';
-
-        if (!preg_match($pattern, (string) $value)) {
+        if (!($this->callback)($value)) {
             return new ValidationError($field, $this->message);
         }
 

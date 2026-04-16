@@ -1,54 +1,128 @@
 <?php
+
+declare(strict_types=1);
+
 namespace MonkeysLegion\Validation;
 
+use MonkeysLegion\Validation\Contracts\ValidatorInterface;
+
 use Psr\Http\Message\ServerRequestInterface;
+
 use ReflectionClass;
 use RuntimeException;
-use MonkeysLegion\Validation\ValidatorInterface;
-use MonkeysLegion\Validation\ValidationError;
 
+/**
+ * Binds PSR-7 request data to a typed DTO and validates it.
+ */
 final class DtoBinder
 {
-    public function __construct(private ValidatorInterface $validator) {}
+    // ── Constructor ───────────────────────────────────────────────
+
+    public function __construct(
+        private readonly ValidatorInterface $validator,
+    ) {}
+
+    // ── Public API ────────────────────────────────────────────────
 
     /**
-     * Bind request payload & query params to a typed DTO, then validate.
+     * Bind request payload to a DTO and validate.
      *
      * @template T of object
-     * @param class-string<T> $dtoClass
-     * @return array{dto:T, errors:ValidationError[]}
-     * @throws \ReflectionException|\JsonException
+     *
+     * @param class-string<T>        $dtoClass
+     * @param ServerRequestInterface $request
+     *
+     * @return array{dto: T, result: ValidationResult}
+     *
+     * @throws RuntimeException      If DTO has no constructor
+     * @throws \JsonException        On invalid JSON body
+     * @throws \ReflectionException  On reflection failure
      */
     public function bind(string $dtoClass, ServerRequestInterface $request): array
     {
-        // Decode JSON body (assumes content-type negotation already happened)
+        $data = $this->extractData($request);
+        $dto = $this->hydrateDto($dtoClass, $data);
+        $result = $this->validator->validate($dto);
+
+        return ['dto' => $dto, 'result' => $result];
+    }
+
+    // ── Private methods ──────────────────────────────────────────
+
+    /**
+     * Extract data from the request (JSON body + query params).
+     *
+     * @return array<string, mixed>
+     */
+    private function extractData(ServerRequestInterface $request): array
+    {
         $data = [];
-        $raw  = (string) $request->getBody();
-        if ($raw !== '') {
-            $data = json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
+
+        // Try parsed body first (form data, pre-parsed JSON)
+        $parsed = $request->getParsedBody();
+
+        if (is_array($parsed)) {
+            $data = $parsed;
+        } else {
+            // Fall back to raw JSON body
+            $raw = (string) $request->getBody();
+
+            if ($raw !== '') {
+                $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+
+                if (is_array($decoded)) {
+                    $data = $decoded;
+                }
+            }
         }
 
-        // Merge query string (query wins)
-        $data = array_merge($data, $request->getQueryParams());
+        // Query params merge (query wins for GET-style overrides)
+        return array_merge($data, $request->getQueryParams());
+    }
 
-        $ref  = new ReflectionClass($dtoClass);
+    /**
+     * Hydrate a DTO from data array.
+     *
+     * @template T of object
+     *
+     * @param class-string<T>       $dtoClass
+     * @param array<string, mixed>  $data
+     *
+     * @return T
+     */
+    private function hydrateDto(string $dtoClass, array $data): object
+    {
+        $ref = new ReflectionClass($dtoClass);
         $ctor = $ref->getConstructor();
 
-        if (!$ctor) {
-            throw new RuntimeException("$dtoClass has no constructor");
+        if ($ctor === null) {
+            throw new RuntimeException("{$dtoClass} has no constructor.");
         }
 
-        // Build args in declared order (promoted props)
         $args = [];
+        $missing = [];
+
         foreach ($ctor->getParameters() as $param) {
             $name = $param->getName();
-            $args[] = $data[$name] ?? $param->getDefaultValue();
+
+            if (array_key_exists($name, $data)) {
+                $args[] = $data[$name];
+            } elseif ($param->isDefaultValueAvailable()) {
+                $args[] = $param->getDefaultValue();
+            } elseif ($param->allowsNull()) {
+                $args[] = null;
+            } else {
+                $missing[] = $name;
+            }
         }
 
-        /** @var T $dto */
-        $dto    = $ref->newInstanceArgs($args);
-        $errors = $this->validator->validate($dto);
+        if ($missing !== []) {
+            throw new RuntimeException(
+                "{$dtoClass} is missing required fields: " . implode(', ', $missing),
+            );
+        }
 
-        return compact('dto', 'errors');
+        /** @var T */
+        return $ref->newInstanceArgs($args);
     }
 }
